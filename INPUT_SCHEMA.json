@@ -1,0 +1,38 @@
+{
+  "title": "AI Lead Scoring & Outreach Generator",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "startUrls": {
+      "title": "Google Maps Search URL",
+      "type": "array",
+      "description": "Paste Google Maps search URL (example: https://www.google.com/maps/search/...)",
+      "editor": "requestListSources"
+    },
+    "maxResults": {
+      "title": "Max results to scrape",
+      "type": "integer",
+      "description": "Maximum number of businesses to scrape (1–300)",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 300
+    },
+    "businessGoal": {
+      "title": "Your Service / Offer",
+      "type": "string",
+      "description": "Service you want to pitch (SEO, Web Design, Digital Marketing, etc.)",
+      "default": "Web Design"
+    },
+    "openaiApiKey": {
+      "title": "OpenAI API Key (optional)",
+      "type": "string",
+      "description": "Used to generate AI-powered personalized outreach messages"
+    },
+    "useProxy": {
+      "title": "Use Apify Proxy",
+      "type": "boolean",
+      "description": "Recommended for Google Maps scraping",
+      "default": true
+    }
+  }
+}
