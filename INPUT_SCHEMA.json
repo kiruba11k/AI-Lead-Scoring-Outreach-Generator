@@ -1,40 +1,66 @@
 {
-  "title": "AI Lead Scoring & Outreach Generator",
+  "title": "AI Lead Intelligence & Outreach Agent",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
     "startUrls": {
       "title": "Google Maps Search URL",
       "type": "array",
-      "description": "Paste Google Maps search URL (example: https://www.google.com/maps/search/...)",
+      "description": "Paste Google Maps search URL",
       "editor": "requestListSources"
     },
     "maxResults": {
       "title": "Max results to scrape",
       "type": "integer",
-      "description": "Maximum number of businesses to scrape (1–300)",
+      "description": "Maximum number of businesses to scrape",
       "default": 30,
       "minimum": 1,
       "maximum": 300,
       "editor": "number"
     },
-    "businessGoal": {
-      "title": "Your Service / Offer",
+    "services": {
+      "title": "Services to Offer (Multiple)",
+      "type": "array",
+      "description": "Select one or more services to pitch",
+      "editor": "select",
+      "items": {
+        "type": "string",
+        "enum": [
+          "Web Design",
+          "SEO",
+          "Digital Marketing",
+          "Google Ads",
+          "Review Management",
+          "Reputation Recovery"
+        ]
+      },
+      "default": ["Web Design"]
+    },
+    "tone": {
+      "title": "Outreach Tone",
       "type": "string",
-      "description": "Service you want to pitch (SEO, Web Design, Digital Marketing, etc.)",
-      "default": "Web Design",
-      "editor": "textfield"
+      "description": "Choose outreach tone",
+      "editor": "select",
+      "enum": ["friendly", "formal", "aggressive"],
+      "default": "friendly"
+    },
+    "language": {
+      "title": "Outreach Language",
+      "type": "string",
+      "description": "Language for outreach messages",
+      "editor": "select",
+      "enum": ["English", "Hindi", "Tamil"],
+      "default": "English"
     },
     "openaiApiKey": {
       "title": "OpenAI API Key (optional)",
       "type": "string",
-      "description": "Used to generate AI-powered personalized outreach messages",
+      "description": "For AI-generated outreach & analysis",
       "editor": "textfield"
     },
     "useProxy": {
       "title": "Use Apify Proxy",
       "type": "boolean",
-      "description": "Recommended for Google Maps scraping",
       "default": true,
       "editor": "checkbox"
     }
