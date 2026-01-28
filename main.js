@@ -5,6 +5,13 @@ import OpenAI from 'openai';
 await Actor.init();
 
 /* ======================
+   CONFIG
+====================== */
+const RESULTS_PER_RUN = 25; // hard free-tier limit
+const STATE_KEY = 'SCRAPE_STATE';
+const SEEN_KEY = 'SEEN_PLACES';
+
+/* ======================
    INPUT
 ====================== */
 const input = await Actor.getInput() || {};
@@ -17,8 +24,16 @@ const {
   useProxy = true,
 } = input;
 
-// 🔒 HARD LIMIT — intentional
-const RESULTS_PER_RUN = 25;
+/* ======================
+   STATE (CONTINUATION)
+====================== */
+const state = (await Actor.getValue(STATE_KEY)) || { lastIndex: 0 };
+let startIndex = state.lastIndex;
+
+/* ======================
+   DEDUP STORE
+====================== */
+const seen = (await Actor.getValue(SEEN_KEY)) || {};
 
 /* ======================
    OPENAI
@@ -63,11 +78,7 @@ async function generatePitches(data) {
     return {
       whatsapp: `Hi ${data.title}, we help businesses grow using ${services.join(', ')}.`,
       email_subject: `Quick idea for ${data.title}`,
-      email_body: `Hi ${data.title},
-
-We help similar businesses with ${services.join(', ')}.
-
-Best regards`,
+      email_body: `Hi ${data.title},\n\nWe help similar businesses with ${services.join(', ')}.\n\nBest regards`,
     };
   }
 
@@ -100,23 +111,35 @@ const crawler = new PlaywrightCrawler({
   async requestHandler({ page, request, log }) {
     log.info('Opening Google Maps');
 
-    // 🚀 Resource optimization (SAFE)
+    // Safe resource blocking (do NOT block stylesheets)
     await page.route('**/*', route => {
-      const type = route.request().resourceType();
-      if (['image', 'media', 'font'].includes(type)) {
-        route.abort();
-      } else {
-        route.continue();
-      }
+      const t = route.request().resourceType();
+      if (['image', 'media', 'font'].includes(t)) route.abort();
+      else route.continue();
     });
 
     await page.goto(request.url, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('div[role="feed"]');
 
-    /* ----------------------
-       Load enough cards
-    ---------------------- */
-    for (let i = 0; i < 5; i++) {
+    /* ======================
+       SCROLL & LOAD CARDS
+    ====================== */
+    let previousCount = 0;
+    let stableScrolls = 0;
+
+    while (stableScrolls < 3) {
+      const count = await page.$$eval(
+        'a[href^="https://www.google.com/maps/place"]',
+        els => els.length
+      );
+
+      if (count === previousCount) {
+        stableScrolls++;
+      } else {
+        stableScrolls = 0;
+        previousCount = count;
+      }
+
       await page.evaluate(() =>
         document.querySelector('div[role="feed"]')?.scrollBy(0, 8000)
       );
@@ -124,15 +147,28 @@ const crawler = new PlaywrightCrawler({
     }
 
     const cards = await page.$$('a[href^="https://www.google.com/maps/place"]');
-    log.info(`Found ${cards.length} cards, extracting ${RESULTS_PER_RUN}`);
+    log.info(`Total cards loaded: ${cards.length}`);
 
-    /* ----------------------
-       Process ONLY 25
-    ---------------------- */
-    for (let i = 0; i < Math.min(cards.length, RESULTS_PER_RUN); i++) {
+    if (cards.length <= startIndex) {
+      log.info('No new places left. Auto-stopping.');
+      await Actor.setValue(STATE_KEY, { lastIndex: 0 });
+      return;
+    }
+
+    const endIndex = Math.min(cards.length, startIndex + RESULTS_PER_RUN);
+    let pushedThisRun = 0;
+
+    /* ======================
+       PROCESS BATCH
+    ====================== */
+    for (let i = startIndex; i < endIndex; i++) {
       try {
+        const card = cards[i];
+        if (!card) break;
+
         const prevTitle = await page.textContent('h1.DUwDvf').catch(() => null);
-        await cards[i].click();
+        await card.focus();
+        await page.keyboard.press('Enter');
 
         await page.waitForFunction(
           prev =>
@@ -157,6 +193,11 @@ const crawler = new PlaywrightCrawler({
 
         if (!data.title) continue;
 
+        const placeId = data.google_maps_link.split('?')[0];
+        if (seen[placeId]) {
+          continue; // dedup
+        }
+
         data.industry = detectIndustry(data.category);
         data.sentiment = analyzeSentiment(data.rating);
 
@@ -164,13 +205,30 @@ const crawler = new PlaywrightCrawler({
         Object.assign(data, pitches);
 
         await Actor.pushData(data);
+
+        // mark progress
+        seen[placeId] = true;
+        state.lastIndex = i + 1;
+        pushedThisRun++;
+
+        await Actor.setValue(SEEN_KEY, seen);
+        await Actor.setValue(STATE_KEY, state);
+
         await sleep(500);
       } catch {
-        log.warning(`Skipped place ${i + 1}`);
+        log.warning(`Skipped index ${i}`);
       }
     }
 
-    log.info('Batch completed safely — exiting run');
+    /* ======================
+       AUTO-STOP LOGIC
+    ====================== */
+    if (pushedThisRun === 0) {
+      log.info('No new unique places pushed in this run. Auto-stopping.');
+      await Actor.setValue(STATE_KEY, { lastIndex: 0 });
+    } else {
+      log.info(`Pushed ${pushedThisRun} new places this run.`);
+    }
   },
 });
 
