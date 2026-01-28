@@ -21,7 +21,7 @@
     "services": {
       "title": "Services to Offer (Multiple)",
       "type": "array",
-      "description": "Select one or more services to pitch",
+      "description": "Select one or more services to pitch during outreach",
       "editor": "select",
       "items": {
         "type": "string",
@@ -39,7 +39,7 @@
     "tone": {
       "title": "Outreach Tone",
       "type": "string",
-      "description": "Choose outreach tone",
+      "description": "Choose the tone of outreach messages",
       "editor": "select",
       "enum": ["friendly", "formal", "aggressive"],
       "default": "friendly"
@@ -47,7 +47,7 @@
     "language": {
       "title": "Outreach Language",
       "type": "string",
-      "description": "Language for outreach messages",
+      "description": "Language used for WhatsApp and email outreach",
       "editor": "select",
       "enum": ["English", "Hindi", "Tamil"],
       "default": "English"
@@ -55,12 +55,13 @@
     "openaiApiKey": {
       "title": "OpenAI API Key (optional)",
       "type": "string",
-      "description": "For AI-generated outreach & analysis",
+      "description": "API key used for AI-generated outreach messages and analysis",
       "editor": "textfield"
     },
     "useProxy": {
       "title": "Use Apify Proxy",
       "type": "boolean",
+      "description": "Enable Apify proxy rotation to reduce blocking and improve scraping reliability",
       "default": true,
       "editor": "checkbox"
     }
