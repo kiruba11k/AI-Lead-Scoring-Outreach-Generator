@@ -4,9 +4,7 @@ import OpenAI from 'openai';
 
 await Actor.init();
 
-/* ======================
-   INPUT
-====================== */
+
 const input = await Actor.getInput() || {};
 
 const {
