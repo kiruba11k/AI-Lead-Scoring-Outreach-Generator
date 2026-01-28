@@ -15,24 +15,28 @@
       "description": "Maximum number of businesses to scrape (1–300)",
       "default": 30,
       "minimum": 1,
-      "maximum": 300
+      "maximum": 300,
+      "editor": "number"
     },
     "businessGoal": {
       "title": "Your Service / Offer",
       "type": "string",
       "description": "Service you want to pitch (SEO, Web Design, Digital Marketing, etc.)",
-      "default": "Web Design"
+      "default": "Web Design",
+      "editor": "textfield"
     },
     "openaiApiKey": {
       "title": "OpenAI API Key (optional)",
       "type": "string",
-      "description": "Used to generate AI-powered personalized outreach messages"
+      "description": "Used to generate AI-powered personalized outreach messages",
+      "editor": "textfield"
     },
     "useProxy": {
       "title": "Use Apify Proxy",
       "type": "boolean",
       "description": "Recommended for Google Maps scraping",
-      "default": true
+      "default": true,
+      "editor": "checkbox"
     }
   }
 }
