@@ -5,17 +5,20 @@ import OpenAI from 'openai';
 await Actor.init();
 const input = await Actor.getInput() || {};
 
+// ======================
+// INPUTS
+// ======================
 const {
   startUrls,
   maxResults = 30,
-  businessGoal = 'Web Design',
+  services = ['Web Design'],
+  tone = 'friendly',
+  language = 'English',
   openaiApiKey,
   useProxy = true,
 } = input;
 
-const openai = openaiApiKey
-  ? new OpenAI({ apiKey: openaiApiKey })
-  : null;
+const openai = openaiApiKey ? new OpenAI({ apiKey: openaiApiKey }) : null;
 
 const proxyConfiguration = useProxy
   ? await Actor.createProxyConfiguration({ useApifyProxy: true })
@@ -25,57 +28,91 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const humanWait = async () => sleep(800 + Math.random() * 1200);
 
 // ======================
-// AI OUTREACH GENERATOR
+// HELPERS
 // ======================
-async function generatePitches(data) {
-  if (!openai) return fallbackPitches(data);
-
-  const prompt = `
-You are a sales outreach expert.
-
-Business name: ${data.title}
-Category: ${data.category}
-Rating: ${data.rating}
-Has website: ${data.has_website}
-Service offered: ${businessGoal}
-
-Generate:
-1. WhatsApp message (friendly, short)
-2. Cold email subject
-3. Cold email body
-
-Return ONLY valid JSON with keys:
-whatsapp, email_subject, email_body
-`;
-
-  try {
-    const res = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-    });
-
-    return JSON.parse(res.choices[0].message.content);
-  } catch {
-    return fallbackPitches(data);
-  }
+function detectIndustry(category = '') {
+  const c = category.toLowerCase();
+  if (c.includes('restaurant') || c.includes('cafe')) return 'restaurant';
+  if (c.includes('clinic') || c.includes('hospital') || c.includes('dental')) return 'healthcare';
+  if (c.includes('agency') || c.includes('marketing')) return 'agency';
+  if (c.includes('salon') || c.includes('spa')) return 'salon';
+  return 'local_business';
 }
 
-// ======================
-// FALLBACK (NO OPENAI)
-// ======================
+function analyzeSentiment(rating) {
+  const r = Number(rating) || 0;
+  if (r >= 4.2) return 'positive';
+  if (r >= 3.5) return 'neutral';
+  return 'negative';
+}
+
+function toneInstruction(tone) {
+  if (tone === 'formal') return 'Use professional and polite language.';
+  if (tone === 'aggressive') return 'Use confident, direct sales language.';
+  return 'Use friendly and conversational language.';
+}
+
+function languageInstruction(language) {
+  if (language === 'Hindi') return 'Write in simple Hindi.';
+  if (language === 'Tamil') return 'Write in simple Tamil.';
+  return 'Write in English.';
+}
+
 function fallbackPitches(data) {
   return {
-    whatsapp: `Hi ${data.title}, I came across your business on Google Maps. We help businesses grow using ${businessGoal}. Can we connect?`,
+    whatsapp: `Hi ${data.title}, I came across your business on Google Maps. We help businesses with ${services.join(
+      ', '
+    )}. Can we connect?`,
     email_subject: `Quick idea to grow ${data.title}`,
     email_body: `Hi ${data.title},
 
-I noticed your business on Google Maps and wanted to share how we help similar businesses with ${businessGoal}.
+I noticed your business on Google Maps and wanted to share how we help businesses with ${services.join(
+      ', '
+    )}.
 
 Would you be open to a quick call?
 
 Best regards`,
   };
+}
+
+// ======================
+// AI OUTREACH
+// ======================
+async function generatePitches(data) {
+  if (!openai) return fallbackPitches(data);
+
+  const prompt = `
+You are an expert sales outreach AI.
+
+Business name: ${data.title}
+Industry: ${data.industry}
+Category: ${data.category}
+Rating: ${data.rating}
+Sentiment: ${data.sentiment}
+Has website: ${data.has_website}
+
+Services offered: ${services.join(', ')}
+
+${toneInstruction(tone)}
+${languageInstruction(language)}
+
+Generate:
+1) WhatsApp message
+2) Cold email subject
+3) Cold email body
+
+Return ONLY valid JSON with keys:
+whatsapp, email_subject, email_body
+`;
+
+  const res = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.7,
+  });
+
+  return JSON.parse(res.choices[0].message.content);
 }
 
 // ======================
@@ -86,8 +123,6 @@ const crawler = new PlaywrightCrawler({
   maxRequestsPerCrawl: 1,
 
   async requestHandler({ page, request, log }) {
-    log.info(`Scraping leads from: ${request.url}`);
-
     await page.goto(request.url, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('div[role="feed"]');
 
@@ -98,14 +133,12 @@ const crawler = new PlaywrightCrawler({
         'a[href^="https://www.google.com/maps/place"]',
         (els) => els.map((e) => e.href)
       );
-
       newLinks.forEach((l) => links.add(l));
-      if (newLinks.length === 0) break;
+      if (!newLinks.length) break;
 
-      await page.evaluate(() => {
-        document.querySelector('div[role="feed"]')?.scrollBy(0, 10000);
-      });
-
+      await page.evaluate(() =>
+        document.querySelector('div[role="feed"]')?.scrollBy(0, 10000)
+      );
       await humanWait();
     }
 
@@ -117,7 +150,6 @@ const crawler = new PlaywrightCrawler({
         const data = await page.evaluate(() => {
           const pick = (s) => document.querySelector(s)?.textContent?.trim() || '';
           const href = (s) => document.querySelector(s)?.href || '';
-
           return {
             title: pick('h1.DUwDvf'),
             category: pick('button.DkEaL'),
@@ -132,11 +164,13 @@ const crawler = new PlaywrightCrawler({
 
         data.has_website = Boolean(data.website);
         data.has_phone = Boolean(data.phone);
+        data.industry = detectIndustry(data.category);
+        data.sentiment = analyzeSentiment(data.rating);
 
         data.lead_score =
           (!data.website ? 40 : 0) +
           (!data.phone ? 20 : 0) +
-          (Number(data.rating) > 0 && Number(data.rating) < 3.5 ? 30 : 0);
+          (data.sentiment === 'negative' ? 30 : 0);
 
         data.priority =
           data.lead_score >= 60 ? 'High' :
@@ -144,10 +178,7 @@ const crawler = new PlaywrightCrawler({
 
         const pitches = await generatePitches(data);
 
-        data.whatsapp_message = pitches.whatsapp;
-        data.email_subject = pitches.email_subject;
-        data.email_body = pitches.email_body;
-
+        Object.assign(data, pitches);
         await Actor.pushData(data);
       } catch {
         log.warning(`Skipped ${url}`);
