@@ -4,12 +4,13 @@ import OpenAI from 'openai';
 
 await Actor.init();
 
-
+/* ======================
+   INPUT
+====================== */
 const input = await Actor.getInput() || {};
-
 const {
   startUrls,
-  maxResults = 30,
+  maxResults = 100,
   services = ['Web Design'],
   tone = 'friendly',
   language = 'English',
@@ -35,7 +36,7 @@ const proxyConfiguration = useProxy
    HELPERS
 ====================== */
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const humanWait = async () => sleep(800 + Math.random() * 1200);
+const humanWait = async () => sleep(500 + Math.random() * 700);
 
 function detectIndustry(category = '') {
   const c = category.toLowerCase();
@@ -110,74 +111,91 @@ whatsapp, email_subject, email_body
 
 function fallbackPitches(data) {
   return {
-    whatsapp: `Hi ${data.title}, I came across your business on Google Maps. We help businesses grow using ${services.join(', ')}. Can we connect?`,
-    email_subject: `Quick idea to grow ${data.title}`,
+    whatsapp: `Hi ${data.title}, I found your business on Google Maps. We help businesses grow using ${services.join(', ')}. Can we connect?`,
+    email_subject: `Quick growth idea for ${data.title}`,
     email_body: `Hi ${data.title},
 
 I noticed your business on Google Maps and wanted to share how we help similar businesses with ${services.join(', ')}.
 
-Would you be open to a quick call?
+Would you be open to a quick chat?
 
 Best regards`,
   };
 }
 
 /* ======================
-   CRAWLER
+   CRAWLER (SPA MODE)
 ====================== */
 const crawler = new PlaywrightCrawler({
   proxyConfiguration,
   maxConcurrency: 1,
   navigationTimeoutSecs: 40,
-  requestHandlerTimeoutSecs: 120,
+  requestHandlerTimeoutSecs: 300,
+
+  preNavigationHooks: [
+    async ({ page }) => {
+      // 🚀 MASSIVE CPU + MEMORY OPTIMIZATION
+      await page.route('**/*', route => {
+        const type = route.request().resourceType();
+        if (['image', 'media', 'font', 'stylesheet'].includes(type)) {
+          route.abort();
+        } else {
+          route.continue();
+        }
+      });
+    },
+  ],
 
   async requestHandler({ page, request, log }) {
+    log.info('Opening Google Maps (SPA mode)');
 
     /* ======================
-       SEARCH PAGE
+       LOAD MAPS ONCE
     ====================== */
-    if (!request.label) {
-      log.info('Collecting Google Maps place URLs...');
+    await page.goto(request.url, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('div[role="feed"]');
 
-      await page.goto(request.url, { waitUntil: 'domcontentloaded' });
-      await page.waitForSelector('div[role="feed"]');
+    // Disable animations
+    await page.addStyleTag({
+      content: `* { animation: none !important; transition: none !important; }`,
+    });
 
-      const links = new Set();
+    /* ======================
+       SCROLL RESULTS
+    ====================== */
+    const collected = new Set();
+    let stableScrolls = 0;
 
-      while (links.size < maxResults) {
-        const newLinks = await page.$$eval(
-          'a[href^="https://www.google.com/maps/place"]',
-          els => els.map(e => e.href)
-        );
-
-        newLinks.forEach(l => links.add(l));
-        if (newLinks.length === 0) break;
-
-        await page.evaluate(() =>
-          document.querySelector('div[role="feed"]')?.scrollBy(0, 8000)
-        );
-
-        await humanWait();
-      }
-
-      await crawler.addRequests(
-        [...links].slice(0, maxResults).map(url => ({
-          url,
-          label: 'PLACE',
-        }))
+    while (collected.size < maxResults && stableScrolls < 5) {
+      const links = await page.$$eval(
+        'a[href^="https://www.google.com/maps/place"]',
+        els => els.map(e => e.href)
       );
 
-      log.info(`Queued ${links.size} places`);
-      return;
+      const before = collected.size;
+      links.forEach(l => collected.add(l));
+      stableScrolls = collected.size === before ? stableScrolls + 1 : 0;
+
+      await page.evaluate(() =>
+        document.querySelector('div[role="feed"]')?.scrollBy(0, 8000)
+      );
+
+      await sleep(800);
     }
 
+    log.info(`Loaded ${collected.size} places`);
+
     /* ======================
-       PLACE PAGE
+       CLICK & EXTRACT (NO NAVIGATION)
     ====================== */
-    if (request.label === 'PLACE') {
+    const cards = await page.$$(
+      'a[href^="https://www.google.com/maps/place"]'
+    );
+
+    for (let i = 0; i < Math.min(cards.length, maxResults); i++) {
       try {
-        await page.goto(request.url, { waitUntil: 'domcontentloaded' });
-        await humanWait();
+        await cards[i].click();
+        await page.waitForSelector('h1.DUwDvf', { timeout: 10000 });
 
         const data = await page.evaluate(() => {
           const pick = s => document.querySelector(s)?.textContent?.trim() || '';
@@ -193,7 +211,7 @@ const crawler = new PlaywrightCrawler({
           };
         });
 
-        if (!data.title) return;
+        if (!data.title) continue;
 
         data.has_website = Boolean(data.website);
         data.has_phone = Boolean(data.phone);
@@ -216,8 +234,9 @@ const crawler = new PlaywrightCrawler({
         data.email_body = pitches.email_body;
 
         await Actor.pushData(data);
-      } catch (err) {
-        log.warning(`Skipped ${request.url}`);
+        await sleep(500);
+      } catch {
+        log.warning('Skipped one place');
       }
     }
   },
