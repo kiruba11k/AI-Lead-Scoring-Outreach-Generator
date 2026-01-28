@@ -4,9 +4,6 @@ import OpenAI from 'openai';
 
 await Actor.init();
 
-/* ======================
-   INPUT
-====================== */
 const input = await Actor.getInput() || {};
 const {
   startUrls,
@@ -36,7 +33,7 @@ const proxyConfiguration = useProxy
    HELPERS
 ====================== */
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const humanWait = async () => sleep(500 + Math.random() * 700);
+const humanWait = async () => sleep(500 + Math.random() * 600);
 
 function detectIndustry(category = '') {
   const c = category.toLowerCase();
@@ -70,7 +67,13 @@ function languageInstruction(language) {
    AI PITCH GENERATOR
 ====================== */
 async function generatePitches(data) {
-  if (!openai) return fallbackPitches(data);
+  if (!openai) {
+    return {
+      whatsapp: `Hi ${data.title}, we help businesses grow using ${services.join(', ')}. Can we connect?`,
+      email_subject: `Quick idea for ${data.title}`,
+      email_body: `Hi ${data.title},\n\nWe help similar businesses with ${services.join(', ')}.\n\nBest regards`,
+    };
+  }
 
   const prompt = `
 You are an expert sales outreach AI.
@@ -96,106 +99,88 @@ Return ONLY valid JSON with:
 whatsapp, email_subject, email_body
 `;
 
-  try {
-    const res = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-    });
+  const res = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.7,
+  });
 
-    return JSON.parse(res.choices[0].message.content);
-  } catch {
-    return fallbackPitches(data);
-  }
-}
-
-function fallbackPitches(data) {
-  return {
-    whatsapp: `Hi ${data.title}, I found your business on Google Maps. We help businesses grow using ${services.join(', ')}. Can we connect?`,
-    email_subject: `Quick growth idea for ${data.title}`,
-    email_body: `Hi ${data.title},
-
-I noticed your business on Google Maps and wanted to share how we help similar businesses with ${services.join(', ')}.
-
-Would you be open to a quick chat?
-
-Best regards`,
-  };
+  return JSON.parse(res.choices[0].message.content);
 }
 
 /* ======================
-   CRAWLER (SPA MODE)
+   CRAWLER
 ====================== */
 const crawler = new PlaywrightCrawler({
   proxyConfiguration,
   maxConcurrency: 1,
   navigationTimeoutSecs: 40,
-  requestHandlerTimeoutSecs: 300,
-
-  preNavigationHooks: [
-    async ({ page }) => {
-      // 🚀 MASSIVE CPU + MEMORY OPTIMIZATION
-      await page.route('**/*', route => {
-        const type = route.request().resourceType();
-        if (['image', 'media', 'font', 'stylesheet'].includes(type)) {
-          route.abort();
-        } else {
-          route.continue();
-        }
-      });
-    },
-  ],
+  requestHandlerTimeoutSecs: 240,
 
   async requestHandler({ page, request, log }) {
     log.info('Opening Google Maps (SPA mode)');
 
-    /* ======================
-       LOAD MAPS ONCE
-    ====================== */
+    /* ----------------------
+       RESOURCE OPTIMIZATION
+       (DO NOT block stylesheets)
+    ---------------------- */
+    await page.route('**/*', route => {
+      const type = route.request().resourceType();
+      if (['image', 'media', 'font'].includes(type)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+
+    /* ----------------------
+       LOAD SEARCH PAGE
+    ---------------------- */
     await page.goto(request.url, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('div[role="feed"]');
 
-    // Disable animations
-    await page.addStyleTag({
-      content: `* { animation: none !important; transition: none !important; }`,
-    });
-
-    /* ======================
-       SCROLL RESULTS
-    ====================== */
-    const collected = new Set();
-    let stableScrolls = 0;
-
-    while (collected.size < maxResults && stableScrolls < 5) {
-      const links = await page.$$eval(
+    /* ----------------------
+       SCROLL TO LOAD RESULTS
+    ---------------------- */
+    let loaded = 0;
+    while (loaded < maxResults) {
+      loaded = await page.$$eval(
         'a[href^="https://www.google.com/maps/place"]',
-        els => els.map(e => e.href)
+        els => els.length
       );
 
-      const before = collected.size;
-      links.forEach(l => collected.add(l));
-      stableScrolls = collected.size === before ? stableScrolls + 1 : 0;
+      await page.evaluate(() => {
+        document.querySelector('div[role="feed"]')?.scrollBy(0, 8000);
+      });
 
-      await page.evaluate(() =>
-        document.querySelector('div[role="feed"]')?.scrollBy(0, 8000)
-      );
-
-      await sleep(800);
+      await humanWait();
     }
 
-    log.info(`Loaded ${collected.size} places`);
+    log.info(`Loaded ${loaded} places`);
 
-    /* ======================
-       CLICK & EXTRACT (NO NAVIGATION)
-    ====================== */
-    const cards = await page.$$(
-      'a[href^="https://www.google.com/maps/place"]'
-    );
-
-    for (let i = 0; i < Math.min(cards.length, maxResults); i++) {
+    /* ----------------------
+       CLICK CARDS (SPA SAFE)
+    ---------------------- */
+    for (let i = 0; i < maxResults; i++) {
       try {
+        const cards = await page.$$('a[href^="https://www.google.com/maps/place"]');
+        if (!cards[i]) break;
+
+        const prevTitle = await page
+          .textContent('h1.DUwDvf')
+          .catch(() => null);
+
         await cards[i].click();
-        await page.waitForSelector('h1.DUwDvf', { timeout: 10000 });
+
+        // Wait until panel actually changes
+        await page.waitForFunction(
+          prev => {
+            const h = document.querySelector('h1.DUwDvf');
+            return h && h.textContent !== prev;
+          },
+          prevTitle,
+          { timeout: 15000 }
+        );
 
         const data = await page.evaluate(() => {
           const pick = s => document.querySelector(s)?.textContent?.trim() || '';
@@ -217,15 +202,6 @@ const crawler = new PlaywrightCrawler({
         data.has_phone = Boolean(data.phone);
         data.industry = detectIndustry(data.category);
         data.sentiment = analyzeSentiment(data.rating);
-
-        data.lead_score =
-          (!data.website ? 40 : 0) +
-          (!data.phone ? 20 : 0) +
-          (Number(data.rating) > 0 && Number(data.rating) < 3.5 ? 30 : 0);
-
-        data.priority =
-          data.lead_score >= 60 ? 'High' :
-          data.lead_score >= 40 ? 'Medium' : 'Low';
 
         const pitches = await generatePitches(data);
 
