@@ -10,7 +10,7 @@ await Actor.init();
 const input = (await Actor.getInput()) || {};
 const {
   startUrls,
-  maxResults = 25, // HARD LIMIT for free tier
+  maxResults = 25,
   services = ['Web Design'],
   tone = 'friendly',
   language = 'English',
@@ -42,7 +42,7 @@ const proxyConfiguration = useProxy
 /* ======================
    HELPERS
 ====================== */
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function detectIndustry(category = '') {
   const c = category.toLowerCase();
@@ -60,18 +60,6 @@ function analyzeSentiment(rating) {
   return 'negative';
 }
 
-function toneInstruction(t) {
-  if (t === 'formal') return 'Use professional and polite language.';
-  if (t === 'aggressive') return 'Use confident, direct, sales-driven language.';
-  return 'Use friendly and conversational language.';
-}
-
-function languageInstruction(l) {
-  if (l === 'Hindi') return 'Write the message in simple Hindi.';
-  if (l === 'Tamil') return 'Write the message in simple Tamil.';
-  return 'Write the message in English.';
-}
-
 /* ======================
    AI PITCH
 ====================== */
@@ -80,23 +68,17 @@ async function generatePitches(data) {
     return {
       whatsapp: `Hi ${data.title}, we help businesses grow using ${services.join(', ')}. Can we connect?`,
       email_subject: `Quick idea for ${data.title}`,
-      email_body: `Hi ${data.title},\n\nWe help businesses with ${services.join(', ')}. Would you be open to a short call?\n`,
+      email_body: `Hi ${data.title},\n\nWe help businesses with ${services.join(', ')}.\n`,
     };
   }
 
   const prompt = `
-You are a sales outreach expert.
-
 Business: ${data.title}
 Industry: ${data.industry}
 Rating: ${data.rating}
 Sentiment: ${data.sentiment}
 Has website: ${data.has_website}
-
 Services: ${services.join(', ')}
-
-${toneInstruction(tone)}
-${languageInstruction(language)}
 
 Return ONLY JSON:
 whatsapp, email_subject, email_body
@@ -117,14 +99,15 @@ whatsapp, email_subject, email_body
 const crawler = new PlaywrightCrawler({
   proxyConfiguration,
   maxConcurrency: 1,
-  navigationTimeoutSecs: 45,
-  requestHandlerTimeoutSecs: 240,
+  maxRequestRetries: 0,
+  navigationTimeoutSecs: 60,
+  requestHandlerTimeoutSecs: 300,
 
   async requestHandler({ page, request, log }) {
     log.info('Opening Google Maps');
 
     // Block heavy assets
-    await page.route('**/*', (route) => {
+    await page.route('**/*', route => {
       const t = route.request().resourceType();
       if (['image', 'media', 'font'].includes(t)) route.abort();
       else route.continue();
@@ -132,36 +115,44 @@ const crawler = new PlaywrightCrawler({
 
     await page.goto(request.url, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('div[role="feed"]');
-    await sleep(1500);
+    await sleep(2000);
 
-    // Scroll once to load cards
-    await page.evaluate(() => {
-      document.querySelector('div[role="feed"]')?.scrollBy(0, 6000);
-    });
-    await sleep(1500);
+    // Scroll to load cards
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => {
+        document.querySelector('div[role="feed"]')?.scrollBy(0, 8000);
+      });
+      await sleep(1500);
+    }
 
-    const cards = await page.$$('div[role="article"]');
-    log.info(`Total cards loaded: ${cards.length}`);
+    let cards = await page.$$('div[role="article"]');
+    log.info(`Cards loaded: ${cards.length}`);
 
     let pushed = 0;
+    let lastTitle = '';
 
-    for (
-      let i = state.lastIndex;
-      i < cards.length && pushed < maxResults;
-      i++
-    ) {
+    for (let i = state.lastIndex; i < cards.length && pushed < maxResults; i++) {
       try {
-        // IMPORTANT: re-query cards every loop (SPA-safe)
         const freshCards = await page.$$('div[role="article"]');
         if (!freshCards[i]) break;
 
-        await freshCards[i].click({ delay: 50 });
-        await page.waitForSelector('h1.DUwDvf', { timeout: 10000 });
-        await sleep(700);
+        // CLICK CARD
+        await freshCards[i].click();
+        await sleep(800);
+
+        // 🔴 CRITICAL FIX — WAIT FOR TITLE CHANGE
+        await page.waitForFunction(
+          prev => {
+            const el = document.querySelector('h1.DUwDvf');
+            return el && el.innerText !== prev;
+          },
+          lastTitle,
+          { timeout: 10000 }
+        );
 
         const data = await page.evaluate(() => {
-          const pick = (s) => document.querySelector(s)?.textContent?.trim() || '';
-          const href = (s) => document.querySelector(s)?.href || '';
+          const pick = s => document.querySelector(s)?.textContent?.trim() || '';
+          const href = s => document.querySelector(s)?.href || '';
           return {
             title: pick('h1.DUwDvf'),
             category: pick('button.DkEaL'),
@@ -172,10 +163,12 @@ const crawler = new PlaywrightCrawler({
           };
         });
 
-        if (!data.title) throw new Error('Panel did not load');
+        if (!data.title) throw new Error('No title');
 
-        const placeKey = data.google_maps_link.split('?')[0];
-        if (seen[placeKey]) {
+        lastTitle = data.title;
+
+        const key = data.google_maps_link.split('?')[0];
+        if (seen[key]) {
           state.lastIndex = i + 1;
           continue;
         }
@@ -190,14 +183,15 @@ const crawler = new PlaywrightCrawler({
 
         await Actor.pushData(data);
 
-        seen[placeKey] = true;
+        seen[key] = true;
         state.lastIndex = i + 1;
         pushed++;
 
         await Actor.setValue(SEEN_KEY, seen);
         await Actor.setValue(STATE_KEY, state);
 
-        await sleep(600);
+        log.info(`Extracted ${pushed}: ${data.title}`);
+        await sleep(700);
 
       } catch (err) {
         log.warning(`Skipped index ${i}: ${err.message}`);
@@ -205,9 +199,7 @@ const crawler = new PlaywrightCrawler({
       }
     }
 
-    if (pushed === 0) {
-      log.info('No new unique places found. Auto-stopping.');
-    }
+    log.info(`Run completed with ${pushed} results`);
   },
 });
 
