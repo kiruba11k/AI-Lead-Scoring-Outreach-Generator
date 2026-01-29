@@ -14,19 +14,7 @@ Stop manually searching for leads. This Actor doesn't just scrape data; it build
 
 ---
 
-## 💰 Estimated Running Costs
 
-We have optimized this Actor for maximum efficiency. Below are the estimated costs based on a standard run using Residential Proxies.
-
-| Quantity | Compute Cost | Time (Est.) | Proxy Cost (Resi)* | **Total Cost** |
-| --- | --- | --- | --- | --- |
-| **20 Leads** | $0.05 | 5 mins | ~$0.15 | **$0.20** |
-| **100 Leads** | $0.25 | 25 mins | ~$0.75 | **$1.00** |
-| **1,000 Leads** | $2.50 | 4.2 hours | ~$7.50 | **$10.00** |
-
-*> Note: Proxy costs vary based on provider and data usage. Asset blocking is enabled by default to minimize data consumption.*
-
----
 
 ## 🛠️ How to Use
 
