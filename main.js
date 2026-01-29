@@ -1,5 +1,5 @@
 import { Actor } from 'apify';
-import { PlaywrightCrawler, createPlaywrightRouter, Dataset } from 'crawlee';
+import { PlaywrightCrawler, createPlaywrightRouter, Dataset, log } from 'crawlee'; 
 import OpenAI from 'openai';
 
 // Initialize the Apify SDK
