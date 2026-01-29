@@ -14,7 +14,13 @@ Stop manually searching for leads. This Actor doesn't just scrape data; it build
 
 ---
 
+## Use Cases
+- Sales outreach
+- SEO agencies
+- Web design leads
+- Digital marketing campaigns
 
+---
 
 ## 🛠️ How to Use
 
