@@ -90,18 +90,21 @@ router.addHandler('DETAIL', async ({ page, request, log }) => {
 /* ======================
    CRAWLER (Optimized for Speed)
 ====================== */
+/* ======================
+   CRAWLER (Fixed & Optimized)
+====================== */
 const crawler = new PlaywrightCrawler({
     proxyConfiguration,
     requestHandler: router,
     maxConcurrency: 1, 
-    // This stops the crawler automatically when the list is done
-    stopRunner: true, 
+    // This is the correct way to ensure it stops after the list + detail pages
+    maxRequestsPerCrawl: maxResults + 5, 
     launchContext: {
         launchOptions: {
             args: ['--no-sandbox', '--disable-dev-shm-usage'],
         },
     },
-    // Speed Boost: Block images and styles
+    // Speed Boost: Block images and styles to save time/credits
     preNavigationHooks: [
         async ({ blockRequests }) => {
             await blockRequests({
