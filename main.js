@@ -5,93 +5,98 @@ import Groq from 'groq-sdk';
 await Actor.init();
 
 /* ======================
-   INPUT
+   1. INPUT & CONFIG
 ====================== */
 const input = (await Actor.getInput()) || {};
-
 const {
     startUrls = [],
-    maxResults = 25,
+    maxResults = 30,
     services = ['Web Design'],
+    tone = 'friendly',
+    language = 'English',
     groqApiKey,
     useProxy = true,
 } = input;
 
 /* ======================
-   GROQ CLIENT
+   2. GROQ CLIENT
 ====================== */
 const groq = groqApiKey ? new Groq({ apiKey: groqApiKey }) : null;
 
 /* ======================
-   PROXY
+   3. PROXY
 ====================== */
 const proxyConfiguration = useProxy
     ? await Actor.createProxyConfiguration({ useApifyProxy: true })
     : undefined;
 
 /* ======================
-   AI HELPER
+   4. AI HELPER (BEST VERSION)
 ====================== */
 async function generatePitches(data) {
     if (!groq) {
         return {
-            whatsapp: "Hi!",
-            email_subject: "Hello",
-            email_body: "Let's connect."
+            whatsapp: 'Hi!',
+            email_subject: 'Hello',
+            email_body: "Let's connect.",
         };
     }
 
     try {
         const res = await groq.chat.completions.create({
-            model: "llama-3.1-8b-instant", // FAST & CHEAP
+            model: 'llama-3.1-8b-instant',
             temperature: 0.7,
-            max_tokens: 300,
+            max_tokens: 350,
             messages: [
                 {
-                    role: "system",
-                    content: "You are a B2B sales copywriter. Respond ONLY in valid JSON."
+                    role: 'system',
+                    content: `You are a world-class B2B sales copywriter.
+Target Language: ${language}.
+Tone: ${tone}.
+Respond ONLY in valid JSON.`,
                 },
                 {
-                    role: "user",
+                    role: 'user',
                     content: `
 Create a personalized sales pitch for ${services.join(', ')}.
 
 Business Name: ${data.title}
 Industry: ${data.industry}
+Rating: ${data.rating}
 
-Return ONLY valid JSON in this format:
+Return ONLY valid JSON:
 {
-  "whatsapp": "...",
-  "email_subject": "...",
-  "email_body": "..."
+  "whatsapp": "short text with emojis",
+  "email_subject": "catchy subject",
+  "email_body": "persuasive email body"
 }
-`
-                }
-            ]
+`,
+                },
+            ],
         });
 
-        const text = res.choices[0]?.message?.content || "{}";
+        const text = res.choices[0]?.message?.content || '{}';
 
-        // SAFETY: Ensure valid JSON
-        const jsonStart = text.indexOf('{');
-        const jsonEnd = text.lastIndexOf('}');
-        if (jsonStart === -1 || jsonEnd === -1) return {};
+        // SAFETY: extract JSON only
+        const start = text.indexOf('{');
+        const end = text.lastIndexOf('}');
+        if (start === -1 || end === -1) return {};
 
-        return JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+        return JSON.parse(text.slice(start, end + 1));
     } catch (err) {
-        log.error("Groq pitch generation failed", err);
+        log.error('Groq generation failed', err);
         return {};
     }
 }
 
 /* ======================
-   ROUTER
+   5. ROUTER
 ====================== */
 const router = createPlaywrightRouter();
 
-/* -------- SEARCH LIST -------- */
+/* -------- SEARCH PAGE -------- */
 router.addDefaultHandler(async ({ page, enqueueLinks, log }) => {
-    log.info('Opening Google Maps search results...');
+    log.info('🚀 Searching Google Maps...');
     await page.waitForSelector('div[role="feed"]', { timeout: 30000 });
 
     let linksFound = 0;
@@ -104,7 +109,7 @@ router.addDefaultHandler(async ({ page, enqueueLinks, log }) => {
         else {
             staleCount = 0;
             linksFound = links.length;
-            log.info(`Found ${linksFound}/${maxResults} listings`);
+            log.info(`Found ${linksFound}/${maxResults}`);
         }
 
         if (linksFound >= maxResults || staleCount > 5) break;
@@ -125,12 +130,11 @@ router.addDefaultHandler(async ({ page, enqueueLinks, log }) => {
 
 /* -------- DETAIL PAGE -------- */
 router.addHandler('DETAIL', async ({ page, request, log }) => {
-    log.info(`Scraping: ${request.url}`);
+    log.info(`🔍 Scraping: ${request.url}`);
     await page.waitForSelector('h1', { timeout: 20000 });
 
     const data = await page.evaluate(() => {
         const pick = sel => document.querySelector(sel)?.textContent?.trim() || '';
-
         return {
             title: pick('h1'),
             rating:
@@ -146,11 +150,13 @@ router.addHandler('DETAIL', async ({ page, request, log }) => {
     });
 
     const pitches = await generatePitches(data);
-    await Dataset.pushData({ ...data, ...pitches });
+
+    // ✅ PPE BILLING EVENT
+    await Dataset.pushData({ ...data, ...pitches }, 'dataset-item');
 });
 
 /* ======================
-   CRAWLER
+   6. CRAWLER
 ====================== */
 const crawler = new PlaywrightCrawler({
     proxyConfiguration,
@@ -169,7 +175,7 @@ const crawler = new PlaywrightCrawler({
                     '.jpg', '.jpeg', '.png', '.svg',
                     '.gif', '.webp', '.css',
                     '.woff', '.woff2',
-                    'googleads', 'analytics'
+                    'googleads', 'analytics',
                 ],
             });
         },
@@ -177,7 +183,7 @@ const crawler = new PlaywrightCrawler({
 });
 
 /* ======================
-   RUN
+   7. RUN
 ====================== */
 log.info('Starting crawler...');
 await crawler.run(startUrls);
