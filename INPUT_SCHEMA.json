@@ -7,7 +7,12 @@
       "title": "Google Maps Search URL",
       "type": "array",
       "description": "Paste a Google Maps search URL (example: web design companies in Bangalore)",
-      "editor": "requestListSources"
+      "editor": "requestListSources",
+      "prefill": [
+        {
+          "url": "https://www.google.com/maps/search/web+design+companies+in+bangalore"
+        }
+      ]
     },
 
     "maxResults": {
@@ -72,5 +77,6 @@
       "default": true,
       "editor": "checkbox"
     }
-  }
+  },
+  "required": ["startUrls", "groqApiKey"]
 }
